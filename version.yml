@@ -24,7 +24,8 @@ steps:
 - script: |
     echo "Year: $(myyear)"
     echo "Week: $(week)"
-    new_version="$(myyear).$(week).00"
+    new_version="$(myyear).$(week).$(git rev-list --count HEAD)"
     sed -i "s/APP_VERSION=\"[0-9.]\+\"/APP_VERSION=\"${new_version}\"/g" script.sh
     echo "printing version"
     cat script.sh 
+
