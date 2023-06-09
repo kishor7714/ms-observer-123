@@ -1,0 +1,30 @@
+# azure-pipelines.yml
+name: FirstPipeline
+
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+variables:
+  myyear: ''
+  week: ''  
+
+steps: 
+- script: echo This pipeline runs first !!
+
+- script: |
+    echo "##vso[task.setvariable variable=myyear]$(date +'%y')"
+    echo "##vso[task.setvariable variable=week]$(date +%V)"
+
+- script: |
+    echo "Year: $(myyear)"
+    echo "Week: $(week)"
+    
+- script: |
+    echo "Year: $(myyear)"
+    echo "Week: $(week)"
+    new_version="$(myyear).$(week).00"
+    sed -i "s/APP_VERSION=\"[0-9.]\+\"/APP_VERSION=\"${new_version}\"/g" script.sh
+    echo "printing version"
+    cat script.sh 
