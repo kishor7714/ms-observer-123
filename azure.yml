@@ -1,0 +1,308 @@
+trigger:
+# - dev
+- feature/*
+- features/*
+# - Rel*
+# - azure-pipelines
+pr: none
+variables:
+  system.debug: 'false'
+  #####new
+  ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/feature') }}:
+    BRANCH_NAME: $[replace(variables['Build.SourceBranchName'], '/', '-')]
+    #Build.SourceBranch gives only branch name
+    #BRANCH_NAME: $[replace(variables['Build.SourceBranchName'], '/', '-')]
+  ###
+#   ${{ if eq(variables['BRANCH_NAME'], 'dev') }}:
+#     TARGET_ENV: dev
+#   ${{ if startsWith(variables['BRANCH_NAME'], 'Rel') }}:
+#     TARGET_ENV: test
+#   ${{ if or( startsWith(variables['BRANCH_NAME'], 'ga'), startsWith(variables['BRANCH_NAME'], 'di') ) }}:
+#     TARGET_ENV: feature
+#   user-defined.TARGET_ENV: $(BRANCH_NAME)
+#   TARGET_ENV: $(BRANCH_NAME)  
+  user-defined.TARGET_APPCENTER_KEY: 8dc4b21a-3893-4fee-88d3-29f0879b87da
+  TARGET_APPCENTER_KEY: 8dc4b21a-3893-4fee-88d3-29f0879b87da
+  user-defined.SEGMENT_WRITE_KEY: Nc4VGSob54eOhtKkmUW0C47TKJCxw9fR
+  SEGMENT_WRITE_KEY: Nc4VGSob54eOhtKkmUW0C47TKJCxw9fR
+  user-defined.AWS_ACCESS_KEY_ID: AKIA6JAH7W2JTJQJJX4U
+  AWS_ACCESS_KEY_ID: AKIA6JAH7W2JTJQJJX4U
+  user-defined.AWS_SECRET_ACCESS_KEY: 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
+  AWS_SECRET_ACCESS_KEY: DLlSoXJbMnk8hNSMPBQZkyUJoqkxO6in7Nqfxcr2
+  MOBILECENTER_OUTPUT_DIRECTORY: $(Build.ArtifactStagingDirectory)/build
+  MOBILECENTER_BRANCH: $(BRANCH_NAME)
+  MOBILECENTER_BUILD_ID: $(Build.BuildNumber)
+  MOBILECENTER_SOURCE_DIRECTORY: $(Build.Repository.LocalPath)
+  MOBILECENTER_TRIGGER: continuous
+  APPCENTER_OUTPUT_DIRECTORY: $(Build.ArtifactStagingDirectory)/build
+  APPCENTER_BRANCH: $(BRANCH_NAME)  
+  APPCENTER_BUILD_ID: $(Build.BuildNumber)
+  APPCENTER_SOURCE_DIRECTORY: $(Build.Repository.LocalPath)
+  APPCENTER_TRIGGER: continuous
+  artifactVersioning.build.format: buildId
+  buildScripts.toolset: '{"package.json":{"preBuild":"appcenter-pre-build.sh"}}'
+  javaScriptRunTests: 'false'
+  MOBILECENTER_REACTNATIVE_PACKAGE: package.json
+  APPCENTER_REACTNATIVE_PACKAGE: package.json
+  SDK: ''
+  TestSDK: iphonesimulator
+  P12Password: null
+  P12Filename: IosDistributionfeb2023.p12
+  MobileProvisionFilename: WithMe_Member_Mobile_DEV_1062022 (1).mobileprovision
+  P12SecureFileId: ada4b490-b4f1-44c6-8aca-42f8bbf44839
+  MobileProvisionSecureFileId: 98723a21-34c7-461f-918c-3668b09c0179
+  AppExtensionProvisionSecureFiles: '[]'
+  MobileProvision: >-
+    {"expirationDate":"2023-01-27T17:14:34.000Z","teamIdentifier":"D79RSM6TXW","type":"app-store","bundleIdentifier":"com.withme.membermobile.dev","UUID":"8158dc92-fcf0-4fbb-a9a4-64d24695445a"}
+  MOBILECENTER_XCODE_PROJECT: ios/WithMe.xcworkspace
+  MOBILECENTER_XCODE_SCHEME: WithMe
+  APPCENTER_XCODE_PROJECT: ios/WithMe.xcworkspace
+  APPCENTER_XCODE_WORKSPACE: ios/WithMe.xcworkspace
+  APPCENTER_XCODE_SCHEME: WithMe
+  sonoma.tags: 'continuous,javascript,xcode,signed,ios'
+name: $(Build.BuildId)
+resources:
+  repositories:
+    - repository: self
+      type: git
+      ref: refs/heads/$(BRANCH_NAME)
+jobs:
+  - job: Phase_1
+    variables:
+    - group: ios
+    displayName: Build
+    cancelTimeoutInMinutes: 0
+    pool:
+      name: Azure Pipelines
+      vmImage: macOS-11
+    steps: 
+      - checkout: self
+        clean: true
+        submodules: recursive
+        lfs: true        
+      - task: PowerShell@2
+        displayName: Install build scripts
+        continueOnError: true
+        inputs:
+          targetType: inline
+          scriptName: ''
+          script: >-
+            Set-Location -Path '$(Agent.HomeDirectory)'
+
+            Invoke-WebRequest -Uri
+            'https://appcenterbuildassets.azureedge.net/buildscripts/appcenter-build-assets-latest.zip'
+            -OutFile 'appcenter-build-assets-latest.zip'
+
+            if (Test-Path ./scripts) { Remove-Item -Path ./scripts -Force
+            -Recurse }
+
+            New-Item -ItemType directory -Path 'scripts' | Out-Null
+
+            unzip -q -d 'scripts' 'appcenter-build-assets-latest.zip'
+
+            Invoke-Expression 'bash ./scripts/init.sh'
+          failOnStderr: true
+      - script: |
+          if [[ "$BRANCH_NAME" == "dev" ]]; then
+            echo TARGET_ENV dev;
+            echo "Add build tags to project so we can use in release pipeline";
+            echo "##vso[task.setvariable variable=TARGET_ENV;]dev"
+          fi
+          if [[ $BRANCH_NAME == "ga" ]] || [[ $BRANCH_NAME == "di" ]] || [[ $BRANCH_NAME == "wma" ]]; then
+            echo TARGET_ENV feature;
+            echo "Add build tags to project so we can use in release pipeline";
+            echo "##vso[task.setvariable variable=TARGET_ENV;]feature_withme"
+          fi
+        displayName: 'set target env'           
+      - task: Bash@3
+        displayName: Select Node.js Version v2
+        inputs:
+          filePath: $(Agent.HomeDirectory)/scripts/select-node-version.sh
+          arguments: node16
+          failOnStderr: true
+      - task: CmdLine@1
+        displayName: yarn/npm install
+        inputs:
+          filename: sh
+          arguments: >-
+            -c "if [ -f yarn.lock ]; then { yarn install
+            --network-timeout=600000 && yarn list --depth=0; } else npm install;
+            fi"
+      - task: ShellScript@2
+        displayName: Pre Build Script
+        inputs:
+          scriptPath: appcenter-pre-build.sh
+      - task: CmdLine@2
+        displayName: Generate source map
+        inputs:
+          script: >-
+            #!/bin/sh
+
+            INDEX_FILE="index.ios.js"
+
+            if [ -f "index.js" ]; then
+              INDEX_FILE="index.js"
+            fi
+
+
+            echo "Found $INDEX_FILE for ReactNative index."
+
+
+            node --max_old_space_size=8192
+            node_modules/react-native/local-cli/cli.js bundle --entry-file
+            $INDEX_FILE --platform ios --dev false --reset-cache --bundle-output
+            dummy-sourcemap-main.jsbundle --sourcemap-output index.ios.map
+          failOnStandardError: false
+      - task: CmdLine@1
+        displayName: Copy source map file to staging
+        inputs:
+          filename: sh
+          arguments: >-
+            -c "mkdir -p $(build.artifactstagingdirectory)/symbols && cp
+            index.ios.map $(build.artifactstagingdirectory)/symbols/"
+          failOnStandardError: true
+          
+      - task: ShellScript@2
+        displayName: Tag build
+        inputs:
+          scriptPath: $(Agent.HomeDirectory)/scripts/emit-tags.sh
+          args: $(sonoma.tags)
+
+      - task: CmdLine@1
+        displayName: Set Xcode path
+        inputs:
+          filename: /bin/bash
+          arguments: >-
+            -c "sudo xcode-select --switch
+            /Applications/Xcode_13.2.1.app/Contents/Developer"
+
+
+      - task: DownloadSecureFile@1
+        name: iosDistributionCertificate
+        displayName: 'Download ios Distribution Certificate'
+        inputs:
+          secureFile: 'IosDistributionfeb2023.p12'
+          
+      - task: DownloadSecureFile@1
+        name: iosProvisionCertificate
+        displayName: 'Download ios Provision Certificate'
+        inputs:
+          secureFile: 'WithMe_Member_Mobile_DEV_1062022 (1).mobileprovision'
+      - task: InstallAppleCertificate@2
+        displayName: Install Apple certificate
+        inputs:
+          certSecureFile: IosDistributionfeb2023.p12
+          certPwd: $(Feb2023P12Password)
+      - task: InstallAppleProvisioningProfile@0
+        displayName: Install Apple provisioning profile
+        inputs:
+          provProfileSecureFile: WithMe_Member_Mobile_DEV_1062022 (1).mobileprovision
+          
+      - task: CocoaPods@0
+        displayName: Pod install
+        inputs:
+          cwd: ios
+          forceRepoUpdate: true   
+      - task: Bash@3
+        displayName: Determine project file path
+        inputs:
+          filePath: $(Agent.HomeDirectory)/scripts/detect-autogenerated-workspace.sh
+          arguments: ios WithMe
+          workingDirectory: $(Build.SourcesDirectory)
+      - task: ShellScript@2
+        displayName: Determine signing style and pods update
+        inputs:
+          scriptPath: >-
+            $(Agent.HomeDirectory)/scripts/determine-signing-style-and-pods-update.sh
+          disableAutoCwd: true
+          cwd: $(Build.SourcesDirectory)
+      - task: CmdLine@1
+        displayName: Set Bundle version
+        inputs:
+          filename: /usr/bin/find
+          arguments: >-
+            . -name "*Info.plist" -exec /usr/libexec/PlistBuddy -c "Set
+            :CFBundleVersion $(Build.BuildNumber)" {} ;
+      - task: CmdLine@1
+        displayName: Update Xcode build settings
+        continueOnError: true
+        inputs:
+          filename: node
+          arguments: >-
+            $(Agent.HomeDirectory)/scripts/build-xcproject-analyzer/node_modules/@build/xcproject-analyzer-script/script/bin.js
+            --app-id="de140927-a70b-433d-a68f-276a15654c44"
+            --app-insights-key="$(AppInsightsKey)"
+            --xc-workspace-path="$(APPCENTER_XCODE_WORKSPACE)" --scheme="WithMe"
+            --code-sign-style="$(SIGNING_OPTION)"
+            --app-provisioning-profile-uuid="cabb8015-56f4-4090-a6ee-a26c7fd41fd0"
+            --code-sign-identity="$(APPLE_CERTIFICATE_SIGNING_IDENTITY)"
+            --development-team="D79RSM6TXW"
+            --app-bundle-identifier="com.withme.membermobile.dev"
+          workingFolder: $(Build.SourcesDirectory)         
+      - task: Xcode@4
+        displayName: Xcode build (signed)
+        inputs:
+          actions: clean
+          configuration: ''
+          xcWorkspacePath: $(APPCENTER_XCODE_PROJECT)
+          scheme: WithMe
+          xcodeDeveloperDir: /Applications/Xcode_13.2.1.app/Contents/Developer
+          packageApp: true
+          archivePath: $(agent.builddirectory)/output/build/archive
+          exportPath: $(agent.builddirectory)/output/build/export
+          signingOption: $(SIGNING_OPTION)
+          outputPattern: $(agent.builddirectory)/output/build
+      - task: CopyFiles@2
+        displayName: Copy build files to staging
+        inputs:
+          SourceFolder: $(agent.builddirectory)/output/build/export
+          Contents: '**/*.ipa'
+          TargetFolder: $(build.artifactstagingdirectory)/build
+          OverWrite: true
+          flattenFolders: true
+      - task: CopyFiles@2
+        displayName: Copy symbol files to staging
+        inputs:
+          SourceFolder: $(agent.builddirectory)/output/build/archive/WithMe.xcarchive/dSYMs
+          Contents: '**/*.dSYM/**'
+          TargetFolder: $(build.artifactstagingdirectory)/symbols
+          OverWrite: true
+      - task: PublishBuildArtifacts@1
+        displayName: Publish build
+        inputs:
+          PathtoPublish: $(build.artifactstagingdirectory)/build
+          ArtifactName: build
+          TargetPath: \\my\share\$(Build.DefinitionName)\$(Build.BuildNumber)
+      - task: PublishBuildArtifacts@1
+        displayName: Publish symbols
+        continueOnError: true
+        inputs:
+          PathtoPublish: $(build.artifactstagingdirectory)/symbols
+          ArtifactName: symbols
+          TargetPath: \\my\share\$(Build.DefinitionName)\$(Build.BuildNumber)          
+          
+      - script: |
+          BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo BRANCH_NAME $BRANCH_NAME;
+            echo "Add build tags to project so we can use in release pipeline";
+            echo "##vso[build.addbuildtag]test";
+          fi
+          if [[ "$BRANCH_NAME" != "main" ]] && [[ $BRANCH_NAME == "feature" ]]; then
+            echo BRANCH_NAME $BRANCH_NAME;
+            echo "Add build tags to project so we can use in release pipeline";
+            echo "##vso[build.addbuildtag]feature";
+          else
+            echo "Branch is not feature or not main"
+          fi
+          if [[ "$BRANCH_NAME" != "main" ]] && [[ $BRANCH_NAME == "Rel" ]]; then
+            echo BRANCH_NAME $BRANCH_NAME;
+            echo "Add build tags to project so we can use in release pipeline";
+            echo "##vso[build.addbuildtag]demo";
+          fi   
+          if [[ "$BRANCH_NAME" != "main" ]] && [[ $BRANCH_NAME != "Rel" ]] && [[ $BRANCH_NAME != "feature" ]]; then
+            echo BRANCH_NAME $BRANCH_NAME;
+            echo "Add build tags to project so we can use in release pipeline";
+            echo "##vso[build.addbuildtag]feature";
+          fi          
+        displayName: 'Run a bash script to add build tags'
